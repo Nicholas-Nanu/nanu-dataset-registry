@@ -1,9 +1,5 @@
 export const config = { api: { bodyParser: true } };
 
-// ── Platform-specific prompt builders ────────────────────────────────────────
-// Each platform has a strict URL format we can validate before returning results.
-// We never ask for general URLs — only formats we can structurally verify.
-
 const TOPICS = {
   uap:               "UFO sightings, UAP reports, government UFO declassified records",
   nhi:               "non-human intelligence encounters, alien contact cases, entity encounter reports",
@@ -16,79 +12,81 @@ const TOPICS = {
   fortean:           "Fortean phenomena, unexplained events, anomalous occurrences",
 };
 
-// Prompt for GitHub raw CSV/XLSX files only
-function githubPrompt(topic, existingUrls) {
-  return `List up to 5 real GitHub repositories that contain CSV or XLSX datasets about ${topic}.
+const PLATFORM_CONFIGS = {
+  github: {
+    label: "GitHub",
+    instruction: `List up to 5 real GitHub repositories containing CSV or XLSX datasets.
+URL format MUST be: https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{path/to/file.csv}
+Only include repos and files you are highly confident actually exist.
+Set login to false.`,
+  },
+  zenodo: {
+    label: "Zenodo",
+    instruction: `List up to 5 real Zenodo records containing CSV or XLSX datasets.
+URL format: https://zenodo.org/record/{RECORD_ID} or https://zenodo.org/record/{RECORD_ID}/files/{filename.csv}
+Record IDs are 5-8 digit numbers. Only include records you are highly confident exist.
+Set login to false.`,
+  },
+  kaggle: {
+    label: "Kaggle",
+    instruction: `List up to 5 real Kaggle datasets containing CSV data.
+URL format MUST be: https://www.kaggle.com/datasets/{owner}/{dataset-slug}
+Only include owner/slug combinations you are highly confident exist.
+Set login to true.`,
+  },
+  gov: {
+    label: "Gov/Inst",
+    instruction: `List up to 3 real datasets from government or institutional open data portals (data.gov, data.europa.eu, data.world, OSF, figshare.com).
+Only include URLs you are highly confident point to real downloadable datasets.`,
+  },
+  huggingface: {
+    label: "Hugging Face",
+    instruction: `List up to 5 real Hugging Face datasets containing tabular/CSV data.
+URL format MUST be: https://huggingface.co/datasets/{owner}/{dataset-name}
+For direct file access: https://huggingface.co/datasets/{owner}/{dataset-name}/resolve/main/{file.csv}
+Only include datasets you are highly confident exist on Hugging Face.
+Set login to false.`,
+  },
+  dataverse: {
+    label: "Harvard Dataverse",
+    instruction: `List up to 5 real Harvard Dataverse datasets containing CSV or tabular data.
+URL format: https://dataverse.harvard.edu/dataset.xhtml?persistentId=doi:{DOI}
+Or direct file: https://dataverse.harvard.edu/api/access/datafile/{FILE_ID}
+Only include datasets you are highly confident exist with that DOI or file ID.
+Set login to false.`,
+  },
+  osf: {
+    label: "OSF",
+    instruction: `List up to 5 real Open Science Framework (OSF) projects containing CSV or XLSX datasets.
+URL format: https://osf.io/{5-char-id}/ for projects, or https://osf.io/download/{5-char-id}/ for files.
+OSF IDs are exactly 5 alphanumeric characters.
+Only include projects you are highly confident exist.
+Set login to false.`,
+  },
+  mendeley: {
+    label: "Mendeley",
+    instruction: `List up to 5 real Mendeley Data datasets containing CSV or XLSX files.
+URL format: https://data.mendeley.com/datasets/{slug}/{version}
+Only include datasets you are highly confident exist with that exact slug and version number.
+Set login to false.`,
+  },
+};
 
-For each one, provide the EXACT raw.githubusercontent.com URL to download the file directly.
-The URL format must be: https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{path/to/file.csv}
+function buildPrompt(platform, topic, existingUrls) {
+  const cfg = PLATFORM_CONFIGS[platform];
+  return `Find datasets about: ${topic}
 
-Rules:
-- Only include repos you are highly confident actually exist
-- Only include files you are highly confident are real CSV or XLSX files in that repo
-- Do NOT invent URLs — only include ones you have strong knowledge of
-- Do NOT include these already-known URLs: ${existingUrls.slice(0, 8).join(", ")}
+${cfg.instruction}
+
+Do NOT include these already-known URLs: ${existingUrls.slice(0, 8).join(", ")}
 
 Return ONLY a JSON array. Each object has exactly these keys:
-"name" (string - descriptive name), "url" (string - full raw.githubusercontent.com URL), "file_type" ("csv" or "xlsx"), "records" (string estimate e.g. "~5,000"), "columns" (array of up to 8 known column name strings), "source_org" (string - who created the data), "login" (false)
+"name" (string), "url" (string), "file_type" ("csv" or "xlsx"), "records" (string e.g. "~5,000"), "columns" (array of up to 8 column name strings), "source_org" (string), "login" (boolean)
 
-No markdown. No explanation. Just the raw JSON array. If you cannot confidently name any real repos, return [].`;
+IMPORTANT: If you are not highly confident a dataset exists at a specific URL, do not include it. Return [] rather than guessing.
+No markdown. No explanation. Just the raw JSON array.`;
 }
 
-// Prompt for Zenodo records only
-function zenodoPrompt(topic, existingUrls) {
-  return `List up to 5 real Zenodo records that contain CSV or XLSX datasets about ${topic}.
-
-For each one, provide the EXACT Zenodo record URL in the format: https://zenodo.org/record/{RECORD_ID}
-Or the direct file download: https://zenodo.org/record/{RECORD_ID}/files/{filename.csv}
-
-Rules:
-- Only include Zenodo records you are highly confident actually exist with that record ID
-- Zenodo record IDs are 5-8 digit numbers
-- Do NOT invent record IDs
-- Do NOT include these already-known URLs: ${existingUrls.slice(0, 8).join(", ")}
-
-Return ONLY a JSON array. Each object has exactly these keys:
-"name" (string), "url" (string - zenodo.org URL), "file_type" ("csv" or "xlsx"), "records" (string), "columns" (array of up to 8 column strings), "source_org" (string), "login" (false)
-
-No markdown. No explanation. Just the raw JSON array. If you cannot confidently name any real Zenodo records, return [].`;
-}
-
-// Prompt for Kaggle datasets only
-function kagglePrompt(topic, existingUrls) {
-  return `List up to 5 real Kaggle datasets that contain CSV or XLSX data about ${topic}.
-
-For each one, provide the URL in the format: https://www.kaggle.com/datasets/{owner}/{dataset-slug}
-
-Rules:
-- Only include Kaggle datasets you are highly confident actually exist with that exact owner/slug
-- Do NOT invent slugs
-- Do NOT include these already-known URLs: ${existingUrls.slice(0, 8).join(", ")}
-
-Return ONLY a JSON array. Each object has exactly these keys:
-"name" (string), "url" (string - kaggle.com/datasets URL), "file_type" ("csv"), "records" (string), "columns" (array of up to 8 column strings), "source_org" (string), "login" (true)
-
-No markdown. No explanation. Just the raw JSON array. If you cannot confidently name any real Kaggle datasets, return [].`;
-}
-
-// Prompt for data.gov / government open data portals
-function govDataPrompt(topic, existingUrls) {
-  return `List up to 3 real government or institutional open data portal datasets containing CSV data about ${topic}.
-
-Acceptable sources: data.gov, data.europa.eu, data.world, Harvard Dataverse, OSF (osf.io), figshare.com
-
-Rules:
-- Only include datasets you are highly confident actually exist at that URL
-- The URL must point to a real dataset page or direct CSV download
-- Do NOT include these already-known URLs: ${existingUrls.slice(0, 8).join(", ")}
-
-Return ONLY a JSON array. Each object has exactly these keys:
-"name" (string), "url" (string), "file_type" ("csv" or "xlsx"), "records" (string), "columns" (array of up to 8 column strings), "source_org" (string), "login" (boolean)
-
-No markdown. No explanation. Just the raw JSON array. If you cannot confidently name any real datasets, return [].`;
-}
-
-// ── JSON parser ───────────────────────────────────────────────────────────────
 function parseJSON(text) {
   let s = text.replace(/```json/gi, "").replace(/```/g, "").trim();
   const a = s.indexOf("["), b = s.lastIndexOf("]");
@@ -97,45 +95,49 @@ function parseJSON(text) {
   try { return JSON.parse(s); } catch (_) { return []; }
 }
 
-// ── URL structural validator ──────────────────────────────────────────────────
-// Checks the URL is structurally valid for its claimed platform before returning
-// it to the client. This catches obvious hallucinations like made-up GitHub paths.
-function validateUrlStructure(item) {
+function validateStructure(item, platform) {
   const url = item.url || "";
+  const warnings = [];
 
-  // GitHub raw — must match exact pattern
-  if (url.includes("raw.githubusercontent.com")) {
+  if (platform === "github" && url.includes("raw.githubusercontent.com")) {
     const parts = url.replace("https://raw.githubusercontent.com/", "").split("/");
-    if (parts.length < 4) return { ...item, structural_warning: "GitHub URL too short — may be invalid" };
-    const ext = parts[parts.length - 1].split(".").pop().toLowerCase();
-    if (!["csv","tsv","xlsx","xls"].includes(ext)) return { ...item, structural_warning: `Unexpected file extension: .${ext}` };
-    return item;
+    if (parts.length < 4) warnings.push("URL path too short");
+    const ext = parts[parts.length - 1]?.split(".").pop()?.toLowerCase();
+    if (!["csv","tsv","xlsx","xls"].includes(ext)) warnings.push(`unexpected extension .${ext}`);
   }
 
-  // Zenodo — record ID must be numeric
-  if (url.includes("zenodo.org")) {
+  if (platform === "zenodo" && url.includes("zenodo.org")) {
     const match = url.match(/zenodo\.org\/record\/(\d+)/);
-    if (!match) return { ...item, structural_warning: "Zenodo URL missing numeric record ID" };
-    const id = parseInt(match[1], 10);
-    if (id < 10000 || id > 99999999) return { ...item, structural_warning: `Zenodo record ID ${id} looks suspicious` };
-    return item;
+    if (!match) warnings.push("missing numeric record ID");
+    else if (parseInt(match[1]) < 1000) warnings.push("record ID suspiciously low");
   }
 
-  // Kaggle — must have owner/slug format
-  if (url.includes("kaggle.com/datasets")) {
+  if (platform === "kaggle" && url.includes("kaggle.com/datasets")) {
     const parts = url.replace(/^https?:\/\/www\.kaggle\.com\/datasets\/?/, "").split("/");
-    if (parts.length < 2 || !parts[0] || !parts[1]) return { ...item, structural_warning: "Kaggle URL missing owner/slug" };
-    return item;
+    if (parts.length < 2 || !parts[0] || !parts[1]) warnings.push("missing owner/slug");
   }
 
-  // Everything else — pass through with a note
-  return item;
+  if (platform === "huggingface" && url.includes("huggingface.co/datasets")) {
+    const parts = url.replace(/^https?:\/\/huggingface\.co\/datasets\/?/, "").split("/");
+    if (parts.length < 2 || !parts[0] || !parts[1]) warnings.push("missing owner/name");
+  }
+
+  if (platform === "osf" && url.includes("osf.io")) {
+    const match = url.match(/osf\.io\/([a-z0-9]{5})/i);
+    if (!match) warnings.push("OSF ID should be 5 alphanumeric characters");
+  }
+
+  if (platform === "mendeley" && url.includes("data.mendeley.com")) {
+    if (!url.includes("/datasets/")) warnings.push("missing /datasets/ in URL");
+  }
+
+  return warnings.length > 0
+    ? { ...item, structural_warning: warnings.join("; ") }
+    : item;
 }
 
-// ── Claude API call ───────────────────────────────────────────────────────────
 async function callClaude(prompt) {
   if (!process.env.ANTHROPIC_API_KEY) throw new Error("ANTHROPIC_API_KEY not set");
-
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
@@ -146,56 +148,36 @@ async function callClaude(prompt) {
     body: JSON.stringify({
       model: "claude-haiku-4-5-20251001",
       max_tokens: 1200,
-      system: "You are a research data archivist. You only return information you are highly confident is accurate. If you are not sure a dataset exists at a specific URL, return an empty array rather than guessing. Return ONLY raw JSON arrays.",
+      system: "You are a research data archivist. Only return datasets you are highly confident exist. If uncertain, return []. Return ONLY raw JSON arrays with no markdown.",
       messages: [{ role: "user", content: prompt }],
     }),
   });
-
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`Anthropic API ${res.status}: ${err}`);
-  }
-
+  if (!res.ok) throw new Error(`Anthropic API ${res.status}`);
   const data = await res.json();
   return (data.content || []).map(b => b.text || "").join("");
 }
 
-// ── Main handler ──────────────────────────────────────────────────────────────
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
-  const catId       = req.body?.catId;
-  const existingUrls= req.body?.existingUrls || [];
-  const platform    = req.body?.platform || "github"; // "github" | "zenodo" | "kaggle" | "gov"
-
+  const { catId, existingUrls = [], platform = "github" } = req.body;
   if (!catId) return res.status(400).json({ error: "Missing catId" });
+  if (!PLATFORM_CONFIGS[platform]) return res.status(400).json({ error: `Unknown platform: ${platform}` });
 
   const topic = TOPICS[catId] || catId;
 
-  const promptMap = {
-    github: githubPrompt(topic, existingUrls),
-    zenodo: zenodoPrompt(topic, existingUrls),
-    kaggle: kagglePrompt(topic, existingUrls),
-    gov:    govDataPrompt(topic, existingUrls),
-  };
-
-  const prompt = promptMap[platform];
-  if (!prompt) return res.status(400).json({ error: `Unknown platform: ${platform}` });
-
   try {
-    const text  = await callClaude(prompt);
+    const text  = await callClaude(buildPrompt(platform, topic, existingUrls));
     const raw   = parseJSON(text);
-
-    // Structurally validate each URL before sending to client
     const items = raw
       .filter(r => r.name && r.url && r.url.startsWith("http"))
-      .map(r => validateUrlStructure({
+      .map(r => validateStructure({
         ...r,
         file_type: (r.file_type || "csv").toLowerCase(),
         login:     !!r.login,
         columns:   Array.isArray(r.columns) ? r.columns.slice(0, 10) : [],
-        platform,  // tag which platform found this
-      }));
+        platform,
+      }, platform));
 
     return res.status(200).json({ items, platform, count: items.length });
   } catch (err) {

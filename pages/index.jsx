@@ -66,7 +66,10 @@ export default function App() {
   const [aiLoading,  setAiLoading]  = useState({});
   const [aiError,    setAiError]    = useState({});
   const [exportMenu, setExportMenu] = useState(false);
-  const [aiPlatform, setAiPlatform] = useState("github"); // "github"|"zenodo"|"kaggle"|"gov"
+  const [aiPlatform,    setAiPlatform]    = useState("github");
+  const [liveLoading,   setLiveLoading]   = useState({});   // key → bool
+  const [liveError,     setLiveError]     = useState({});
+  const [ckanPortal,    setCkanPortal]    = useState("data.gov");
   const exportRef = useRef(null);
 
   useEffect(() => {
@@ -145,8 +148,51 @@ export default function App() {
     finally { setAiLoading(p=>({...p,[catId]:false})); }
   }, [aiItems]);
 
-  const handleExport = mode => {
-    setExportMenu(false);
+  const liveSearchZenodo = useCallback(async (catId) => {
+    const key = `zenodo_${catId}`;
+    setLiveLoading(p => ({...p, [key]: true}));
+    setLiveError(p   => ({...p, [key]: null}));
+    try {
+      const res  = await fetch("/api/search-zenodo", {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({ catId }),
+      });
+      const d = await res.json();
+      if (d.error) throw new Error(d.error);
+      const existing = new Set([
+        ...SEEDS[catId].map(r => r.url),
+        ...(aiItems[catId] || []).map(r => r.url),
+      ]);
+      const fresh = (d.items || []).filter(r => r.url && !existing.has(r.url));
+      setAiItems(p => ({...p, [catId]: [...(p[catId]||[]), ...fresh]}));
+    } catch (e) { setLiveError(p => ({...p, [key]: e.message})); }
+    finally { setLiveLoading(p => ({...p, [`zenodo_${catId}`]: false})); }
+  }, [aiItems]);
+
+  const liveSearchCKAN = useCallback(async (catId, portal) => {
+    const key = `ckan_${portal}_${catId}`;
+    setLiveLoading(p => ({...p, [key]: true}));
+    setLiveError(p   => ({...p, [key]: null}));
+    try {
+      const res  = await fetch("/api/search-ckan", {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({ catId, portal }),
+      });
+      const d = await res.json();
+      if (d.error) throw new Error(d.error);
+      const existing = new Set([
+        ...SEEDS[catId].map(r => r.url),
+        ...(aiItems[catId] || []).map(r => r.url),
+      ]);
+      const fresh = (d.items || []).filter(r => r.url && !existing.has(r.url));
+      setAiItems(p => ({...p, [catId]: [...(p[catId]||[]), ...fresh]}));
+    } catch (e) { setLiveError(p => ({...p, [key]: e.message})); }
+    finally { setLiveLoading(p => ({...p, [key]: false})); }
+  }, [aiItems]);
+
+  const handleExport = mode => {    setExportMenu(false);
     const all = buildExportRows(CATEGORIES, SEEDS, aiItems, statuses);
     const map = {
       "live-nologin":     [all.filter(r=>r.status==="live"&&!r.login),          "nanu-live-nologin.csv"],
@@ -397,41 +443,91 @@ export default function App() {
                   ))}
                 </div>
               </div>
-              <div style={{display:"flex",gap:"6px"}}>
-                <button className="btn" onClick={validateTab}
-                  style={{padding:"7px 13px",fontSize:"9px",background:"transparent",color:"#1FC2C2",border:"1px solid #1FC2C2"}}>
-                  ◈ VALIDATE TAB
-                </button>
-                {/* Platform picker + Find More */}
-                <div style={{display:"flex",gap:"0",border:"1px solid #9333EA",borderRadius:"2px",overflow:"hidden"}}>
-                  {[
-                    {key:"github", label:"GitHub"},
-                    {key:"zenodo", label:"Zenodo"},
-                    {key:"kaggle", label:"Kaggle"},
-                    {key:"gov",    label:"Gov/Inst"},
-                  ].map(p=>(
-                    <button key={p.key}
-                      onClick={()=>setAiPlatform(p.key)}
-                      style={{padding:"7px 9px",fontSize:"8px",fontWeight:700,letterSpacing:".06em",cursor:"pointer",border:"none",fontFamily:"'Space Mono',monospace",background:aiPlatform===p.key?"#9333EA":"transparent",color:aiPlatform===p.key?"#fff":"#9333EA",transition:"all .12s",borderRight:"1px solid #9333EA20"}}>
-                      {p.label}
-                    </button>
-                  ))}
-                  <button className="btn" onClick={()=>fetchAI(active,aiPlatform)} disabled={!!aiLoading[active]}
-                    style={{padding:"7px 11px",fontSize:"9px",background:"#9333EA20",color:"#9333EA",border:"none",borderRadius:"0"}}>
-                    {aiLoading[active]?<span className="spin">◉</span>:"◎"} FIND
-                  </button>
-                </div>
-              </div>
+              <button className="btn" onClick={validateTab}
+                style={{padding:"7px 13px",fontSize:"9px",background:"transparent",color:"#1FC2C2",border:"1px solid #1FC2C2"}}>
+                ◈ VALIDATE TAB
+              </button>
             </div>
 
-            {aiError[active]&&(
-              <div style={{background:"#1A0A0A",border:"1px solid #C23A3A",padding:"9px 14px",borderRadius:"2px",marginBottom:"10px",fontSize:"10px",color:"#F87171"}}>⚠ {aiError[active]}</div>
-            )}
+            {/* Search section */}
+            <div style={{background:"#060F12",border:"1px solid #0D2A2A",borderRadius:"2px",padding:"12px 14px",marginBottom:"14px"}}>
+              <div style={{display:"flex",gap:"16px",flexWrap:"wrap",alignItems:"flex-start"}}>
+
+                {/* AI-assisted search */}
+                <div style={{flex:"1",minWidth:"280px"}}>
+                  <div style={{fontSize:"8px",color:"#9333EA",letterSpacing:".12em",fontWeight:700,marginBottom:"7px"}}>◎ AI-ASSISTED — Claude suggests based on training data</div>
+                  <div style={{display:"flex",gap:"0",border:"1px solid #9333EA30",borderRadius:"2px",overflow:"hidden",flexWrap:"wrap"}}>
+                    {[
+                      {key:"github",      label:"GitHub"},
+                      {key:"zenodo",      label:"Zenodo"},
+                      {key:"kaggle",      label:"Kaggle"},
+                      {key:"gov",         label:"Gov"},
+                      {key:"huggingface", label:"HuggingFace"},
+                      {key:"dataverse",   label:"Dataverse"},
+                      {key:"osf",         label:"OSF"},
+                      {key:"mendeley",    label:"Mendeley"},
+                    ].map(p=>(
+                      <button key={p.key} onClick={()=>setAiPlatform(p.key)}
+                        style={{padding:"5px 9px",fontSize:"8px",fontWeight:700,letterSpacing:".05em",cursor:"pointer",border:"none",fontFamily:"'Space Mono',monospace",background:aiPlatform===p.key?"#9333EA":"transparent",color:aiPlatform===p.key?"#fff":"#9333EA",transition:"all .12s",borderRight:"1px solid #9333EA20",whiteSpace:"nowrap"}}>
+                        {p.label}
+                      </button>
+                    ))}
+                    <button className="btn" onClick={()=>fetchAI(active,aiPlatform)} disabled={!!aiLoading[active]}
+                      style={{padding:"5px 12px",fontSize:"9px",background:"#9333EA",color:"#fff",border:"none",borderRadius:"0",marginLeft:"auto"}}>
+                      {aiLoading[active]?<span className="spin">◉</span>:"◎"} SEARCH
+                    </button>
+                  </div>
+                </div>
+
+                {/* Divider */}
+                <div style={{width:"1px",background:"#0D2A2A",alignSelf:"stretch",minHeight:"40px"}}/>
+
+                {/* Live search */}
+                <div style={{flex:"1",minWidth:"280px"}}>
+                  <div style={{fontSize:"8px",color:"#10B981",letterSpacing:".12em",fontWeight:700,marginBottom:"7px"}}>◈ LIVE SEARCH — Real results from open data APIs, no AI guessing</div>
+                  <div style={{display:"flex",gap:"6px",flexWrap:"wrap"}}>
+                    {/* Zenodo live */}
+                    <button className="btn"
+                      onClick={()=>liveSearchZenodo(active)}
+                      disabled={!!liveLoading[`zenodo_${active}`]}
+                      style={{padding:"5px 11px",fontSize:"9px",background:"transparent",color:"#10B981",border:"1px solid #10B98140"}}>
+                      {liveLoading[`zenodo_${active}`]?<span className="spin">◉</span>:"◈"} Zenodo API
+                    </button>
+                    {/* CKAN portals */}
+                    <div style={{display:"flex",gap:"0",border:"1px solid #10B98130",borderRadius:"2px",overflow:"hidden"}}>
+                      {["data.gov","data.gov.uk","data.europa.eu","open.canada.ca"].map(p=>(
+                        <button key={p} onClick={()=>setCkanPortal(p)}
+                          style={{padding:"5px 8px",fontSize:"8px",fontWeight:700,cursor:"pointer",border:"none",fontFamily:"'Space Mono',monospace",background:ckanPortal===p?"#10B981":"transparent",color:ckanPortal===p?"#050C0F":"#10B981",transition:"all .12s",borderRight:"1px solid #10B98120",whiteSpace:"nowrap",letterSpacing:".04em"}}>
+                          {p.replace("data.","").replace(".eu","").replace(".ca","")}
+                        </button>
+                      ))}
+                      <button className="btn"
+                        onClick={()=>liveSearchCKAN(active,ckanPortal)}
+                        disabled={!!liveLoading[`ckan_${ckanPortal}_${active}`]}
+                        style={{padding:"5px 10px",fontSize:"9px",background:"#10B981",color:"#050C0F",border:"none",borderRadius:"0"}}>
+                        {liveLoading[`ckan_${ckanPortal}_${active}`]?<span className="spin">◉</span>:"◈"} SEARCH
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Errors */}
+              {(aiError[active] || liveError[`zenodo_${active}`] || liveError[`ckan_${ckanPortal}_${active}`]) && (
+                <div style={{marginTop:"8px",fontSize:"9px",color:"#F87171",background:"#1A0A0A",border:"1px solid #C23A3A30",borderRadius:"2px",padding:"6px 10px"}}>
+                  {aiError[active] && <div>◎ AI: {aiError[active]}</div>}
+                  {liveError[`zenodo_${active}`] && <div>◈ Zenodo: {liveError[`zenodo_${active}`]}</div>}
+                  {liveError[`ckan_${ckanPortal}_${active}`] && <div>◈ CKAN: {liveError[`ckan_${ckanPortal}_${active}`]}</div>}
+                </div>
+              )}
+            </div>
 
             <div style={{background:"#060F12",border:"1px solid #0D2A2A",borderRadius:"2px",padding:"9px 14px",marginBottom:"14px",fontSize:"9px",color:"#82F9F6",opacity:.5,lineHeight:1.7}}>
               <span style={{color:"#1FC2C2",opacity:1,fontWeight:700}}>HOW TO USE: </span>
-              <strong>◈ CHECK</strong> validates URL + file size · <strong>▾ COLS</strong> fetches real column headers · <strong>◈ VALIDATE TAB</strong> checks all rows ·
-              <span style={{color:"#10B981",opacity:1}}> Results auto-saved — reload anytime.</span>
+              <strong>◈ CHECK</strong> validates URL + file size · <strong>▾ COLS</strong> fetches real column headers ·
+              <span style={{color:"#10B981",opacity:1}}> Live Search returns real results from open data APIs.</span>
+              <span style={{color:"#9333EA",opacity:1}}> AI Search suggests datasets from training data — always validate.</span>
+              Results <span style={{color:"#10B981",opacity:1}}>auto-saved</span>.
             </div>
 
             <div style={{border:"1px solid #0D2A2A",borderRadius:"2px",overflow:"hidden"}}>
@@ -465,8 +561,11 @@ export default function App() {
                       <div style={{fontSize:"9px",color:cat.color,opacity:.3,fontWeight:700}}>{String(i+1).padStart(2,"0")}</div>
                       <div style={{display:"flex",flexDirection:"column",gap:"4px"}}>
                         <span style={{fontSize:"9px",fontWeight:700,padding:"2px 7px",borderRadius:"2px",background:ftB.bg,color:ftB.color,border:`1px solid ${ftB.border}`,letterSpacing:".08em"}}>{ftB.label}</span>
-                        <span style={{fontSize:"9px",fontWeight:700,padding:"2px 7px",borderRadius:"2px",background:row.source==="seed"?"#071A1A":"#12071A",color:row.source==="seed"?"#1FC2C2":"#9333EA",border:row.source==="seed"?"1px solid #1FC2C218":"1px solid #9333EA20"}}>
-                          {row.source==="seed"?"CURATED":"AI"}
+                        <span style={{fontSize:"9px",fontWeight:700,padding:"2px 7px",borderRadius:"2px",
+                          background:row.source==="seed"?"#071A1A": row.platform?.startsWith("ckan")?"#071A13": row.platform?.startsWith("zenodo_live")?"#071A13":"#12071A",
+                          color:row.source==="seed"?"#1FC2C2": row.platform?.startsWith("ckan")?"#10B981": row.platform==="zenodo_live"?"#10B981":"#9333EA",
+                          border:row.source==="seed"?"1px solid #1FC2C218": (row.platform?.startsWith("ckan")||row.platform==="zenodo_live")?"1px solid #10B98120":"1px solid #9333EA20"}}>
+                          {row.source==="seed"?"CURATED": row.platform==="zenodo_live"?"ZENODO LIVE": row.platform?.startsWith("ckan")?(row.portal||"CKAN").replace("data.","").toUpperCase():"AI"}
                         </span>
                       </div>
                       <div>
