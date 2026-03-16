@@ -66,6 +66,7 @@ export default function App() {
   const [aiLoading,  setAiLoading]  = useState({});
   const [aiError,    setAiError]    = useState({});
   const [exportMenu, setExportMenu] = useState(false);
+  const [aiPlatform, setAiPlatform] = useState("github"); // "github"|"zenodo"|"kaggle"|"gov"
   const exportRef = useRef(null);
 
   useEffect(() => {
@@ -130,15 +131,16 @@ export default function App() {
     finally { setFetching(p=>({...p,[row.url]:false})); }
   }, []);
 
-  const fetchAI = useCallback(async catId => {
+  const fetchAI = useCallback(async (catId, platform) => {
     setAiLoading(p=>({...p,[catId]:true}));
     setAiError(p=>({...p,[catId]:null}));
     try {
       const existing = [...SEEDS[catId].map(r=>r.url),...(aiItems[catId]||[]).map(r=>r.url)];
-      const res = await fetch("/api/suggest",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({catId,existingUrls:existing})});
+      const res = await fetch("/api/suggest",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({catId,existingUrls:existing,platform:platform||"github"})});
       const d = await res.json();
       if (d.error) throw new Error(d.error);
-      setAiItems(p=>({...p,[catId]:[...(p[catId]||[]),...(d.items||[]).filter(r=>!ALL_SEED_URLS.has(r.url))]}));
+      const newItems = (d.items||[]).filter(r=>!ALL_SEED_URLS.has(r.url));
+      setAiItems(p=>({...p,[catId]:[...(p[catId]||[]),...newItems]}));
     } catch (e) { setAiError(p=>({...p,[catId]:e.message})); }
     finally { setAiLoading(p=>({...p,[catId]:false})); }
   }, [aiItems]);
@@ -400,10 +402,25 @@ export default function App() {
                   style={{padding:"7px 13px",fontSize:"9px",background:"transparent",color:"#1FC2C2",border:"1px solid #1FC2C2"}}>
                   ◈ VALIDATE TAB
                 </button>
-                <button className="btn" onClick={()=>fetchAI(active)} disabled={!!aiLoading[active]}
-                  style={{padding:"7px 13px",fontSize:"9px",background:"transparent",color:"#9333EA",border:"1px solid #9333EA"}}>
-                  {aiLoading[active]?<span className="spin">◉</span>:"◎"} FIND MORE
-                </button>
+                {/* Platform picker + Find More */}
+                <div style={{display:"flex",gap:"0",border:"1px solid #9333EA",borderRadius:"2px",overflow:"hidden"}}>
+                  {[
+                    {key:"github", label:"GitHub"},
+                    {key:"zenodo", label:"Zenodo"},
+                    {key:"kaggle", label:"Kaggle"},
+                    {key:"gov",    label:"Gov/Inst"},
+                  ].map(p=>(
+                    <button key={p.key}
+                      onClick={()=>setAiPlatform(p.key)}
+                      style={{padding:"7px 9px",fontSize:"8px",fontWeight:700,letterSpacing:".06em",cursor:"pointer",border:"none",fontFamily:"'Space Mono',monospace",background:aiPlatform===p.key?"#9333EA":"transparent",color:aiPlatform===p.key?"#fff":"#9333EA",transition:"all .12s",borderRight:"1px solid #9333EA20"}}>
+                      {p.label}
+                    </button>
+                  ))}
+                  <button className="btn" onClick={()=>fetchAI(active,aiPlatform)} disabled={!!aiLoading[active]}
+                    style={{padding:"7px 11px",fontSize:"9px",background:"#9333EA20",color:"#9333EA",border:"none",borderRadius:"0"}}>
+                    {aiLoading[active]?<span className="spin">◉</span>:"◎"} FIND
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -462,6 +479,7 @@ export default function App() {
                           {row.records&&<span style={{fontSize:"9px",color:"#82F9F6",opacity:.4}}>{row.records} records</span>}
                           {row.source_org&&<span style={{fontSize:"9px",color:"#82F9F6",opacity:.3}}>{row.source_org}</span>}
                           {realCols&&<span style={{fontSize:"9px",color:"#10B981",opacity:.8}}>✓ real headers</span>}
+                          {row.structural_warning&&<span style={{fontSize:"8px",color:"#F59E0B",background:"#1A1200",border:"1px solid #F59E0B30",borderRadius:"2px",padding:"1px 5px"}}>⚠ {row.structural_warning}</span>}
                         </div>
                       </div>
                       <div style={{display:"flex",alignItems:"center",gap:"4px",flexWrap:"nowrap"}}>
