@@ -67,9 +67,10 @@ export default function App() {
   const [aiError,    setAiError]    = useState({});
   const [exportMenu, setExportMenu] = useState(false);
   const [aiPlatform,    setAiPlatform]    = useState("github");
-  const [liveLoading,   setLiveLoading]   = useState({});   // key → bool
+  const [liveLoading,   setLiveLoading]   = useState({});
   const [liveError,     setLiveError]     = useState({});
   const [ckanPortal,    setCkanPortal]    = useState("data.gov");
+  const [bingQueryIdx,  setBingQueryIdx]  = useState({});  // catId → queryIndex
   const exportRef = useRef(null);
 
   useEffect(() => {
@@ -191,6 +192,31 @@ export default function App() {
     } catch (e) { setLiveError(p => ({...p, [key]: e.message})); }
     finally { setLiveLoading(p => ({...p, [key]: false})); }
   }, [aiItems]);
+
+  const liveSearchBing = useCallback(async (catId) => {
+    const key = `bing_${catId}`;
+    setLiveLoading(p => ({...p, [key]: true}));
+    setLiveError(p   => ({...p, [key]: null}));
+    try {
+      const qIdx = bingQueryIdx[catId] || 0;
+      const res  = await fetch("/api/search-bing", {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({ catId, queryIndex: qIdx }),
+      });
+      const d = await res.json();
+      if (d.error) throw new Error(d.error);
+      const existing = new Set([
+        ...SEEDS[catId].map(r => r.url),
+        ...(aiItems[catId] || []).map(r => r.url),
+      ]);
+      const fresh = (d.items || []).filter(r => r.url && !existing.has(r.url));
+      setAiItems(p => ({...p, [catId]: [...(p[catId]||[]), ...fresh]}));
+      // Advance query index for next click
+      setBingQueryIdx(p => ({...p, [catId]: d.nextQueryIndex || 0}));
+    } catch (e) { setLiveError(p => ({...p, [key]: e.message})); }
+    finally { setLiveLoading(p => ({...p, [key]: false})); }
+  }, [aiItems, bingQueryIdx]);
 
   const handleExport = mode => {    setExportMenu(false);
     const all = buildExportRows(CATEGORIES, SEEDS, aiItems, statuses);
@@ -486,6 +512,14 @@ export default function App() {
                 <div style={{flex:"1",minWidth:"280px"}}>
                   <div style={{fontSize:"8px",color:"#10B981",letterSpacing:".12em",fontWeight:700,marginBottom:"7px"}}>◈ LIVE SEARCH — Real results from open data APIs, no AI guessing</div>
                   <div style={{display:"flex",gap:"6px",flexWrap:"wrap"}}>
+                    {/* Bing web search */}
+                    <button className="btn"
+                      onClick={()=>liveSearchBing(active)}
+                      disabled={!!liveLoading[`bing_${active}`]}
+                      style={{padding:"5px 11px",fontSize:"9px",background:"transparent",color:"#0EA5E9",border:"1px solid #0EA5E940"}}>
+                      {liveLoading[`bing_${active}`]?<span className="spin">◉</span>:"◈"} Bing Web
+                      {bingQueryIdx[active] ? <span style={{marginLeft:"4px",opacity:.5}}>q{(bingQueryIdx[active]||0)+1}</span> : null}
+                    </button>
                     {/* Zenodo live */}
                     <button className="btn"
                       onClick={()=>liveSearchZenodo(active)}
@@ -513,11 +547,12 @@ export default function App() {
               </div>
 
               {/* Errors */}
-              {(aiError[active] || liveError[`zenodo_${active}`] || liveError[`ckan_${ckanPortal}_${active}`]) && (
+              {(aiError[active] || liveError[`zenodo_${active}`] || liveError[`bing_${active}`] || liveError[`ckan_${ckanPortal}_${active}`]) && (
                 <div style={{marginTop:"8px",fontSize:"9px",color:"#F87171",background:"#1A0A0A",border:"1px solid #C23A3A30",borderRadius:"2px",padding:"6px 10px"}}>
-                  {aiError[active] && <div>◎ AI: {aiError[active]}</div>}
-                  {liveError[`zenodo_${active}`] && <div>◈ Zenodo: {liveError[`zenodo_${active}`]}</div>}
-                  {liveError[`ckan_${ckanPortal}_${active}`] && <div>◈ CKAN: {liveError[`ckan_${ckanPortal}_${active}`]}</div>}
+                  {aiError[active]                              && <div>◎ AI: {aiError[active]}</div>}
+                  {liveError[`bing_${active}`]                  && <div>◈ Bing: {liveError[`bing_${active}`]}</div>}
+                  {liveError[`zenodo_${active}`]                && <div>◈ Zenodo: {liveError[`zenodo_${active}`]}</div>}
+                  {liveError[`ckan_${ckanPortal}_${active}`]    && <div>◈ CKAN: {liveError[`ckan_${ckanPortal}_${active}`]}</div>}
                 </div>
               )}
             </div>
@@ -562,10 +597,10 @@ export default function App() {
                       <div style={{display:"flex",flexDirection:"column",gap:"4px"}}>
                         <span style={{fontSize:"9px",fontWeight:700,padding:"2px 7px",borderRadius:"2px",background:ftB.bg,color:ftB.color,border:`1px solid ${ftB.border}`,letterSpacing:".08em"}}>{ftB.label}</span>
                         <span style={{fontSize:"9px",fontWeight:700,padding:"2px 7px",borderRadius:"2px",
-                          background:row.source==="seed"?"#071A1A": row.platform?.startsWith("ckan")?"#071A13": row.platform?.startsWith("zenodo_live")?"#071A13":"#12071A",
-                          color:row.source==="seed"?"#1FC2C2": row.platform?.startsWith("ckan")?"#10B981": row.platform==="zenodo_live"?"#10B981":"#9333EA",
-                          border:row.source==="seed"?"1px solid #1FC2C218": (row.platform?.startsWith("ckan")||row.platform==="zenodo_live")?"1px solid #10B98120":"1px solid #9333EA20"}}>
-                          {row.source==="seed"?"CURATED": row.platform==="zenodo_live"?"ZENODO LIVE": row.platform?.startsWith("ckan")?(row.portal||"CKAN").replace("data.","").toUpperCase():"AI"}
+                          background:row.source==="seed"?"#071A1A": row.platform==="bing"?"#071320": row.platform?.startsWith("ckan")?"#071A13": row.platform?.startsWith("zenodo_live")?"#071A13":"#12071A",
+                          color:row.source==="seed"?"#1FC2C2": row.platform==="bing"?"#0EA5E9": row.platform?.startsWith("ckan")?"#10B981": row.platform==="zenodo_live"?"#10B981":"#9333EA",
+                          border:row.source==="seed"?"1px solid #1FC2C218": row.platform==="bing"?"1px solid #0EA5E920": (row.platform?.startsWith("ckan")||row.platform==="zenodo_live")?"1px solid #10B98120":"1px solid #9333EA20"}}>
+                          {row.source==="seed"?"CURATED": row.platform==="bing"?"BING WEB": row.platform==="zenodo_live"?"ZENODO LIVE": row.platform?.startsWith("ckan")?(row.portal||"CKAN").replace("data.","").toUpperCase():"AI"}
                         </span>
                       </div>
                       <div>
